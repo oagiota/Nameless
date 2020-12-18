@@ -144,6 +144,7 @@ if (Input::exists()) {
                         'last_user_posted' => $user->data()->id,
                         'last_topic_posted' => $topic_id
                     ));
+                    $forum->updateForumLatestPosts($fid);
 
                     Log::getInstance()->log(Log::Action('forums/topic/create'), Output::getClean(Input::get('title')));
 

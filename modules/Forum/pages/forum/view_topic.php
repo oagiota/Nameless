@@ -271,6 +271,7 @@ if (Input::exists()) {
                     'topic_last_user' => $user->data()->id,
                     'topic_reply_date' => date('U')
                 ));
+                $forum->updateForumLatestPosts($topic->forum_id);
 
                 // Alerts + Emails
                 $users_following = $queries->getWhere('topics_following', array('topic_id', '=', $tid));

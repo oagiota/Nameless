@@ -224,99 +224,92 @@ class Forum {
         return false;
     }
 
-    // Updates the latest post column in all forums. Used when a reply/topic is deleted
-    public function updateForumLatestPosts() {
-        $forums = $this->_db->get('forums', array('id', '<>', 0))->results();
-        $latest_posts = array();
-        $n = 0;
+    // Gets a forum's top-most parent
+    public function getTopParent($forum_id, $category = false) {
+    	$parent_id = $forum_id;
+        $depth = 0;
+        while ($depth++ < 10) {
+            $forum = $this->_db->get('forums', array('id', '=', $parent_id));
 
-        foreach ($forums as $item) {
-            if ($item->parent != 0) {
-                $latest_post_query = $this->_db->orderWhere('posts', 'forum_id = ' . $item->id, 'post_date', 'DESC')->results();
-
-                if (!empty($latest_post_query)) {
-                    foreach ($latest_post_query as $latest_post) {
-                        if ($latest_post->deleted != 1) {
-                            // Ensure topic isn't deleted
-                            $topic_query = $this->_db->get('topics', array('id', '=', $latest_post->topic_id))->results();
-
-                            if (empty($topic_query)) continue;
-
-                            $latest_posts[$n]["forum_id"] = $item->id;
-                            if ($latest_post->created)
-                                $latest_posts[$n]["date"] = $latest_post->created;
-                            else
-                                $latest_posts[$n]["date"] = strtotime($latest_post->post_date);
-                            $latest_posts[$n]["author"] = $latest_post->post_creator;
-                            $latest_posts[$n]["topic_id"] = $latest_post->topic_id;
-
-                            break;
-                        }
-                    }
-                }
-
-                if (!isset($latest_posts[$n])) {
-                    $latest_posts[$n]["forum_id"] = $item->id;
-                    $latest_posts[$n]["date"] = null;
-                    $latest_posts[$n]["author"] = null;
-                    $latest_posts[$n]["topic_id"] = null;
-                }
-
-                $n++;
+            if (!$forum->count()) {
+                break;
             }
+
+            $forum = $forum->first();
+
+            if (!$forum->parent || (!$category && $forum->forum_type == 'category')) {
+                break;
+            }
+
+            $forum_id = $forum->id;
+            $parent_id = $forum->parent;
+            $depth++;
         }
 
-        $forums = null;
+        return $forum_id;
+    }
 
-        if (count($latest_posts)) {
-            foreach ($latest_posts as $latest_post) {
-                $this->_db->update('forums', $latest_post["forum_id"], array(
-                    'last_post_date' => $latest_post["date"],
-                    'last_user_posted' => $latest_post["author"],
-                    'last_topic_posted' => $latest_post["topic_id"]
-                ));
-            }
+    // Updates the latest post column in a forum
+    public function updateForumLatestPosts($forum_id, $deleting = false) {
+        $forum = $this->_db->get('forums', array('id', '=', $forum_id));
+
+        if (!$forum->count()) {
+            return false;
         }
+        $forum = $forum->first();
 
-        $latest_posts = null;
+        $recent_post = array(
+            'topic_id' => $forum->last_topic_posted,
+            'date' => $forum->last_post_date,
+            'user_id' => $forum->last_user_posted
+        );
+
+        $height = 0;
+
+        while ($height++ < 10) {
+            $forum = $this->_db->get('forums', array('id', '=', $forum->parent));
+
+            if (!$forum->count()) {
+                break;
+            }
+            $forum = $forum->first();
+
+            // If deleting a post in a topic
+	        // The parent forum has the deleted post's creation date saved which is obviously newer than the next oldest post in the child forum
+	        // So it breaks here
+	        if ($deleting) {
+
+	        } else if ($forum->last_post_date > $recent_post['date']) {
+		        break;
+	        }
+
+            $this->_db->update('forums', $forum->id, array(
+                'last_topic_posted' => $recent_post['topic_id'],
+                'last_post_date' => $recent_post['date'],
+                'last_user_posted' => $recent_post['user_id']
+            ));
+        }
 
         return true;
     }
 
-    // Updates the latest post column in all topics
-    public function updateTopicLatestPosts() {
-        $topics = $this->_db->get('topics', array('id', '<>', 0))->results();
-        $latest_posts = array();
-        $n = 0;
+    // Updates the latest post column in a topic and also its forum if required
+    public function updateTopicLatestPost($topic_id, $forum_id = null) {
+        $topic = $this->_db->get('topics', array('id', '=', $topic_id))->first();
 
-        foreach ($topics as $topic) {
-            $latest_post_query = $this->_db->orderWhere('posts', 'topic_id = ' . $topic->id, 'post_date', 'DESC')->results();
+        if ($topic) {
+            $post = $this->_db->query('SELECT post_creator, post_date, created FROM nl2_posts WHERE topic_id = ? AND deleted = 0 ORDER BY created DESC LIMIT 1', array($topic_id))->first();
 
-            if (count($latest_post_query)) {
-                foreach ($latest_post_query as $latest_post) {
-                    if ($latest_post->deleted != 1) {
-                        $latest_posts[$n]["topic_id"] = $topic->id;
+            $this->_db->update('topics', $topic_id, array(
+                'topic_reply_date' => $post->created ? $post->created : strtotime($post->post_date),
+                'topic_last_user' => $post->post_creator
+            ));
 
-                        if ($latest_post->created != null)
-                            $latest_posts[$n]["date"] = $latest_post->created;
-                        else
-                            $latest_posts[$n]["date"] = strtotime($latest_post->post_date);
-
-                        $latest_posts[$n]["author"] = $latest_post->post_creator;
-
-                        break;
-                    }
-                }
-            }
-
-            $n++;
-        }
-
-        foreach ($latest_posts as $latest_post) {
-            if (!empty($latest_post["date"])) {
-                $this->_db->update('topics', $latest_post["topic_id"], array(
-                    'topic_reply_date' => $latest_post["date"],
-                    'topic_last_user' => $latest_post["author"]
+            if ($forum_id) {
+                $this->_db->update('forums', $forum_id, array(
+                    'last_post_date' => $post->created ? $post->created : strtotime($post->post_date),
+                    'last_user_posted' => $post->post_creator,
+                    'last_topic_posted' => $topic_id,
                 ));
             }
         }

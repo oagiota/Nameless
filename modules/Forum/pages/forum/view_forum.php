@@ -187,12 +187,15 @@ if ($forum_query->redirect_forum == 1) {
         foreach ($subforums as $subforum) {
             // Get number of topics
             if ($forum->forumExist($subforum->id, $user_groups)) {
-                if ($forum->canViewOtherTopics($subforum->id, $user_groups))
-                    $latest_post = $queries->orderWhere('topics', 'forum_id = ' . $subforum->id . ' AND deleted = 0', 'topic_reply_date', 'DESC');
-                else
+                if ($forum->canViewOtherTopics($subforum->id, $user_groups)){
+                    $latest_post = $queries->getWhere('topics', array('id', '=', $subforum->last_topic_posted));
+                    $subforum_topics = DB::getInstance()->query('SELECT COUNT(*) AS `count` FROM nl2_topics WHERE forum_id = ? AND deleted = 0', array($subforum->id))->first();
+                } else {
+                    // TODO: won't work for sub-subforum posts
                     $latest_post = $queries->orderWhere('topics', 'forum_id = ' . $subforum->id . ' AND deleted = 0 AND topic_creator = ' . $user_id, 'topic_reply_date', 'DESC');
+                    $subforum_topics = DB::getInstance()->query('SELECT COUNT(*) AS `count` FROM nl2_topics WHERE forum_id = ? AND deleted = 0 AND topic_creator = ?', array($subforum->id, $user_id))->first();
+                }
 
-                $subforum_topics = count($latest_post);
                 if (count($latest_post)) {
                     foreach ($latest_post as $item) {
                         if ($item->deleted == 0) {
@@ -229,7 +232,7 @@ if ($forum_query->redirect_forum == 1) {
                     'id' => $subforum->id,
                     'title' => Output::getPurified(Output::getDecoded($subforum->forum_title)),
                     'description' => Output::getPurified(Output::getDecoded($subforum->forum_description)),
-                    'topics' => $subforum_topics,
+                    'topics' => $subforum_topics->count,
                     'link' => URL::build('/forum/view/' . $subforum->id . '-' . $forum->titleToURL($subforum->forum_title)),
                     'latest_post' => $latest_post,
                     'icon' => Output::getDecoded($subforum->icon),

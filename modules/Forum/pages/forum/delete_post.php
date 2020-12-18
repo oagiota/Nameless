@@ -35,6 +35,7 @@ if (!count($post)) {
 }
 $post = $post[0];
 
+$topic_id = $post->topic_id;
 $forum_id = $post->forum_id;
 
 if ($forum->canModerateForum($forum_id, $user->getAllGroupIds())) {
@@ -63,23 +64,31 @@ if ($forum->canModerateForum($forum_id, $user->getAllGroupIds())) {
                     'deleted' => 1
                 ));
 
-                if (isset($opening_post)) {
-                    $posts = $queries->getWhere('posts', array('topic_id', '=', $_POST['tid']));
+                $posts = DB::getInstance()->query('SELECT * FROM nl2_posts WHERE topic_id = ? AND deleted = 0', array($topic_id))->results();
 
+                if (isset($opening_post)) {
                     if (count($posts)) {
-                        foreach ($posts as $post) {
-                            $queries->update('posts', $post->id, array(
-                                'deleted' => 1
-                            ));
-                            Log::getInstance()->log(Log::Action('forums/post/delete'), $post->id);
-                        }
+                        DB::getInstance()->createQuery('UPDATE nl2_posts SET deleted = 1 WHERE topic_id = ?', $topic_id);
                     }
+
+                    $recent_post = DB::getInstance()->query('SELECT topic_id, created, post_date, post_creator FROM nl2_posts WHERE deleted = 0 AND forum_id = ? ORDER BY created DESC LIMIT 1', array($forum_id))->first();
+
+                    $queries->update('forums', $forum_id, array(
+                        'last_post_date' => $recent_post ? ($recent_post->created ? $recent_post->created : strtotime($recent_post->post_date)) : null,
+                        'last_user_posted' => $recent_post ? $recent_post->post_creator : null,
+                        'last_topic_posted' => $recent_post ? $recent_post->topic_id : null
+                    ));
+
+                    echo '<pre>', print_r($recent_post), '</pre>';
+                } else {
+                    $forum->updateTopicLatestPost($topic_id, $forum_id);
                 }
 
-                // Update latest posts in categories
-                $forum->updateForumLatestPosts();
-                $forum->updateTopicLatestPosts();
+                echo '<pre>', print_r(DB::getInstance()->query('SELECT * FROM nl2_forums WHERE id = ?', array($forum_id))->results()), '</pre>';
 
+                $forum->updateForumLatestPosts($forum_id);
+
+                die();
                 Redirect::to($redirect);
                 die();
             } catch (Exception $e) {

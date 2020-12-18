@@ -58,7 +58,16 @@ if ($forum->canModerateForum($topic->forum_id, $user->getAllGroupIds())) {
         }
 
         // Update latest posts in forums
-        $forum->updateForumLatestPosts();
+        $recent_post = DB::getInstance()->query('SELECT id, topic_reply_date, topic_last_user, forum_id FROM nl2_topics WHERE forum_id = ? AND `deleted` = 0 ORDER BY topic_reply_date DESC LIMIT 1', array($topic->forum_id))->first();
+
+        if ($topic->forum_id !== $recent_post->forum_id) {
+            $queries->update('forums', $topic->forum_id, array(
+                'last_post_date' => $recent_post ? $recent_post->topic_reply_date : null,
+                'last_user_posted' => $recent_post ? $recent_post->topic_last_user : null,
+                'last_topic_posted' => $recent_post ? $recent_post->id : null,
+            ));
+            $forum->updateForumLatestPosts($topic->forum_id);
+        }
 
         Redirect::to(URL::build('/forum'));
         die();
